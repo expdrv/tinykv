@@ -175,14 +175,62 @@ func (r *Raft) sendAppend(to uint64) bool {
 	return false
 }
 
+func (r *Raft) bcastHeartbeat() {
+	for k := range r.Prs {
+		r.sendHeartbeat(k)
+	}
+}
+
 // sendHeartbeat sends a heartbeat RPC to the given peer.
 func (r *Raft) sendHeartbeat(to uint64) {
 	// Your Code Here (2A).
+	msg := pb.Message{
+		MsgType: pb.MessageType_MsgHeartbeat,
+		To:      to,
+		From:    r.id,
+		Term:    r.Term,
+		// LogTerm:              r.Term,
+		// Index:                r.RaftLog.applied,
+		// Entries:              []*pb.Entry{},
+		// Commit:               0,
+		// Snapshot:             &pb.Snapshot{},
+		// Reject:               false,
+		// XXX_NoUnkeyedLiteral: struct{}{},
+		// XXX_unrecognized:     []byte{},
+		// XXX_sizecache:        0,
+	}
+	r.msgs = append(r.msgs, msg)
 }
 
 // tick advances the internal logical clock by a single tick.
 func (r *Raft) tick() {
 	// Your Code Here (2A).
+	switch r.State {
+	case StateLeader:
+		r.tickHeartBeat()
+	case StateFollower, StateCandidate:
+		r.tickElection()
+	}
+}
+
+func (r *Raft) tickHeartBeat() {
+	r.heartbeatElapsed++
+	/*r.electionElapsed++
+	if r.electionElapsed >= r.electionTimeout {
+		r.becomeCandidate()
+	}*/
+	if r.heartbeatElapsed >= r.heartbeatTimeout && r.leadTransferee == 0 {
+		r.heartbeatElapsed = 0
+		r.Step(pb.Message{From: r.id, MsgType: pb.MessageType_MsgHeartbeat})
+	}
+}
+
+func (r *Raft) tickElection() {
+	r.electionElapsed++
+	if r.electionElapsed >= r.electionTimeout {
+		r.electionElapsed = 0
+		r.Step(pb.Message{From: r.id, MsgType: pb.MessageType_MsgHup})
+	}
 }
 
 // becomeFollower transform this peer's state to Follower
@@ -223,6 +271,48 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 	// Your Code Here (2A).
 }
 
+func (r *Raft) handlePropose(m pb.Message) error {
+	if r.State == StateCandidate {
+		//drop it
+		return ErrProposalDropped
+	}
+	if r.State == StateFollower {
+		//foward to leader
+		m.To = r.Lead
+		m.From = r.id
+		//TODO other fields
+		r.msgs = append(r.msgs, m)
+	}
+	if r.State == StateLeader {
+		//TODO
+
+	}
+	return nil
+}
+
+func (r *Raft) handleRequestVote(m pb.Message) error {
+	if r.State == StateCandidate {
+		//drop it
+		resp := pb.Message{From: m.To, To: m.From, MsgType: pb.MessageType_MsgRequestVoteResponse}
+		if m.Term < r.Term {
+			resp.Reject = true
+			resp.Term = r.Term
+		}
+	}
+	if r.State == StateFollower {
+		//foward to leader
+		m.To = r.Lead
+		m.From = r.id
+		//TODO other fields
+		r.msgs = append(r.msgs, m)
+	}
+	if r.State == StateLeader {
+		//TODO
+
+	}
+	return nil
+}
+
 // handleSnapshot handle Snapshot RPC request
 func (r *Raft) handleSnapshot(m pb.Message) {
 	// Your Code Here (2C).
@@ -236,4 +326,86 @@ func (r *Raft) addNode(id uint64) {
 // removeNode remove a node from raft group
 func (r *Raft) removeNode(id uint64) {
 	// Your Code Here (3A).
+}
+
+func (r *Raft) stepLeader(m pb.Message) error {
+	switch m.MsgType {
+	case pb.MessageType_MsgBeat:
+		r.bcastHeartbeat()
+	case pb.MessageType_MsgHup:
+		return errors.New("leader node can not hold MsgHup")
+	case pb.MessageType_MsgPropose:
+		return r.handlePropose(m)
+	case pb.MessageType_MsgRequestVote:
+		return r.handleRequestVote(m)
+	case pb.MessageType_MsgRequestVoteResponse:
+
+	case pb.MessageType_MsgHeartbeat:
+
+	case pb.MessageType_MsgHeartbeatResponse:
+
+	case pb.MessageType_MsgAppend:
+	case pb.MessageType_MsgAppendResponse:
+
+	case pb.MessageType_MsgSnapshot:
+
+	case pb.MessageType_MsgTransferLeader:
+
+	case pb.MessageType_MsgTimeoutNow:
+	}
+	return nil
+}
+
+func (r *Raft) stepFollower(m pb.Message) error {
+	switch m.MsgType {
+	case pb.MessageType_MsgBeat:
+		r.bcastHeartbeat()
+	case pb.MessageType_MsgHup:
+		return errors.New("leader node can not hold MsgHup")
+	case pb.MessageType_MsgPropose:
+		return r.handlePropose(m)
+	case pb.MessageType_MsgRequestVote:
+	case pb.MessageType_MsgRequestVoteResponse:
+
+	case pb.MessageType_MsgHeartbeat:
+
+	case pb.MessageType_MsgHeartbeatResponse:
+
+	case pb.MessageType_MsgAppend:
+	case pb.MessageType_MsgAppendResponse:
+
+	case pb.MessageType_MsgSnapshot:
+
+	case pb.MessageType_MsgTransferLeader:
+
+	case pb.MessageType_MsgTimeoutNow:
+	}
+	return nil
+}
+
+func (r *Raft) stepCandidate(m pb.Message) error {
+	switch m.MsgType {
+	case pb.MessageType_MsgBeat:
+		r.bcastHeartbeat()
+	case pb.MessageType_MsgHup:
+		return errors.New("leader node can not hold MsgHup")
+	case pb.MessageType_MsgPropose:
+		return r.handlePropose(m)
+	case pb.MessageType_MsgRequestVote:
+	case pb.MessageType_MsgRequestVoteResponse:
+
+	case pb.MessageType_MsgHeartbeat:
+
+	case pb.MessageType_MsgHeartbeatResponse:
+
+	case pb.MessageType_MsgAppend:
+	case pb.MessageType_MsgAppendResponse:
+
+	case pb.MessageType_MsgSnapshot:
+
+	case pb.MessageType_MsgTransferLeader:
+
+	case pb.MessageType_MsgTimeoutNow:
+	}
+	return nil
 }
